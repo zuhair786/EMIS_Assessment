@@ -6,11 +6,13 @@ from exception.emis_exception import JobFailedError
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 glue_client = boto3.client('glue')
+mysql_connector = os.environ['MYSQL_CONNECTOR_JAR']
 
 def invoke_glue_job(job_name, s3_location):
     try:
         job_arguments = {
             "--s3_loc": s3_location
+            "--jars": mysql_connector
         }
         response = glue_client.start_job_run(
             JobName=job_name,

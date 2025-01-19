@@ -20,15 +20,17 @@ df_exploded = s3_df.select(explode(col("entry")).alias("entry"))
 flattened_df = df_exploded.select(
     col("entry.resource.resourceType").alias("ResourceType"),
     col("entry.resource.id").alias("ResourceID"),
-    col("entry.resource.text.div").alias("TextDiv"),
-    col("entry.resource.meta.profile").alias("Profile")
+    col("entry.resource.text.div").alias("TextDiv")
 )
 
 # Show the flattened DataFrame
 flattened_df.show(truncate=False)
 flattened_df = flattened_df.fillna("null")
 
-mysql_url = "jdbc:mysql://mysql:3306/testdb"
+rds_host = "your-rds-endpoint.amazonaws.com"
+rds_port = "3306"
+database_name = "emis"
+mysql_url = f"jdbc:mysql://{rds_host}:{rds_port}/{database_name}"
 mysql_table = "flattened_data"
 mysql_properties = {
     "user": "spark",

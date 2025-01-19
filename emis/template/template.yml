@@ -18,6 +18,7 @@ Globals:
         s3_url_expiry_in_seconds: !Ref S3UrlExpiryInSeconds
         IS_LOGLEVEL_DEBUG: !Ref IsLoggingLevelDebug
         GLUE_JOB_NAME: !Ref glueJobName
+        MYSQL_CONNECTOR_JAR: !Ref jarLocation
 
 Parameters:
   environment:
@@ -44,6 +45,9 @@ Parameters:
   s3BucketName:
     Type: String
     Default: emis-assessment
+  jarLocation:
+    Type: String
+    Default: s3://emis/jar/mysql-connector-java.jar
   glueJobName:
     Type: String
     Default: proces_patient_data_job
