@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform:
+  - AWS::Serverless-2016-10-31
+Description: AWS SAM Template for emis-assessment
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Timeout: 180
+    Tracing: Active
+    Layers:
+      - !Ref Libs
+      - !Ref ProcessingUtilities
+    Environment:
+      Variables:
+        ENV: !Sub "${environment}"
+        s3_upload_bucket: !Ref s3BucketName
+        s3_url_expiry_in_seconds: !Ref S3UrlExpiryInSeconds
+        IS_LOGLEVEL_DEBUG: !Ref IsLoggingLevelDebug
+        GLUE_JOB_NAME: !Ref glueJobName
+
+Parameters:
+  environment:
+    Type: String
+    Default: dev
+  CertificateArn:
+    Type: String
+    Default: arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012
+  ApiGatewayCustomDomainName:
+    Type: String
+    Default: emis.com
+  route53PubHostedZoneId:
+    Type: String
+    Default: Z1234567890
+  RetentionInDays:
+    Type: String
+    Default: 30
+  LambdaRetryAttempts:
+    Type: String
+    Default: 0
+  MigrationProcessorLambdaMemorySize:
+    Type: String
+    Default: 512
+  s3BucketName:
+    Type: String
+    Default: emis-assessment
+  glueJobName:
+    Type: String
+    Default: proces_patient_data_job
+  S3UrlExpiryInSeconds:
+    Type: String
+    Default: 300
+  IsLoggingLevelDebug:
+    Type: String
+    Default: false
+
+
+
+Resources:
+  Libs:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "emis_python_packages_${environment}"
+      Description: Has all python dependencies for lambda functions
+      ContentUri: ../lambdas/libs
+      RetentionPolicy: Delete
+      CompatibleRuntimes:
+        - python3.11
+  ProcessingUtilities:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: !Sub "emis_common_${environment}"
+      Description: Has all python dependencies for lambda functionalities
+      ContentUri: ../lambdas/common
+      RetentionPolicy: Delete
+      CompatibleRuntimes:
+        - python3.11
+
+  EmisApiGateway:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: !Ref environment
+      AccessLogSettings:
+        DestinationArn: !Sub ${EmisHttpApiGatewayLogGroup.Arn}
+        Format: "{ 'requestId': '$context.requestId', 'ip': '$context.identity.sourceIp', 'requestTime': '$context.requestTime', 'httpMethod': '$context.httpMethod', 'routeKey': '$context.routeKey', 'status': '$context.status'}"
+      DisableExecuteApiEndpoint: true
+      Domain:
+        CertificateArn: !Ref CertificateArn
+        DomainName: !Ref ApiGatewayCustomDomainName
+        EndpointConfiguration: REGIONAL
+        SecurityPolicy: TLS_1_2
+        Route53:
+          HostedZoneId: !Sub "${route53PubHostedZoneId}"
+          EvaluateTargetHealth: true
+      Tags:
+        project: emis_assessment
+        Component: api_gateway
+        environment: !Ref environment
+
+  uploadProcessLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "upload-process-lambda-${environment}"
+      Tags:
+        project: emis_assessment
+        Component: engine-python
+        environment: !Ref environment
+      Description: To get the s3_presigned_url for the folder and file name and upload the patient files in JSON format. After upload, process the data to get insights.
+      CodeUri: ../lambdas/base
+      Handler: base_handler.lambda_handler
+      Role: !Ref lambdaRole
+      EventInvokeConfig:
+        MaximumRetryAttempts: !Ref LambdaRetryAttempts
+      Environment:
+        Variables:
+          migration_job_name: !Ref GLUE_JOB_NAME
+          s3_upload_bucket: !Ref s3BucketName
+          s3_url_expiry_in_seconds: !Ref S3UrlExpiryInSeconds
+      MemorySize: !Ref MigrationProcessorLambdaMemorySize
+      Runtime: python3.11
+      Timeout: 180
+      Policies:
+        - CloudWatchLambdaInsightsExecutionRolePolicy
+      Events:
+        UploadPatientData:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EmisApiGateway
+            Path: /emis/patientrecord/upload
+            Method: POST
+        ProcessPatientData:
+          Type: HttpApi
+          Properties:
+            ApiId: !Ref EmisApiGateway
+            Path: /emis/patientrecord/process
+            Method: POST
+  EmisHttpApiGatewayLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName:
+        !Join [
+          '',
+          [ '/aws/apigatway/', !Sub 'emis-outfacing-gateway-${environment}' ]
+        ]
+      RetentionInDays: !Ref RetentionInDays
+      Tags:
+        - Key: Project
+          Value: emis_assessment
+        - Key: environment
+          Value: !Ref environment
+        - Key: Component
+          Value: apigateway-cw-logs
+
+Outputs:
+  uploadAndProcessLambdaFunction:
+    Description: Name of the Lambda function
+    Value: !Ref uploadProcessLambda
+  uploadAndProcessLambdaArn:
+    Description: ARN of the Lambda function
+    Value: !GetAtt uploadProcessLambda.Arn
